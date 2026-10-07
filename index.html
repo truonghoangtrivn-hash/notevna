@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Phần Mềm Ghi Chú</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; max-width: 600px; margin: auto; }
+        textarea { width: 100%; height: 100px; margin-bottom: 10px; padding: 10px; box-sizing: border-box;}
+        input[type="text"] { width: 100%; padding: 10px; margin-bottom: 20px; box-sizing: border-box; border: 2px solid #007bff; border-radius: 5px;}
+        button { padding: 10px 15px; background: #007bff; color: white; border: none; cursor: pointer; border-radius: 5px;}
+        button:hover { background: #0056b3; }
+        .note { border: 1px solid #ddd; padding: 15px; margin-top: 15px; background: #f9f9f9; border-radius: 5px; white-space: pre-wrap; position: relative;}
+        .date { font-size: 0.8em; color: #666; margin-bottom: 10px; border-bottom: 1px solid #ccc; padding-bottom: 5px;}
+        .edit-btn { position: absolute; top: 10px; right: 10px; background: #ffc107; color: #000; padding: 5px 10px; font-size: 0.8em;}
+        .edit-btn:hover { background: #e0a800; }
+        .cancel-btn { background: #dc3545; margin-left: 5px;}
+        .cancel-btn:hover { background: #c82333; }
+    </style>
+</head>
+<body>
+
+    <h1>Ghi Chú Đám Mây ☁️📝</h1>
+    
+    <!-- Thanh tìm kiếm -->
+    <input type="text" id="searchInput" placeholder="🔍 Tìm kiếm mọi thứ trong ghi chú...">
+
+    <!-- Tạo/Sửa ghi chú -->
+    <textarea id="noteContent" placeholder="Nhập nội dung ghi chú của bạn vào đây..."></textarea>
+    <div>
+        <button id="saveButton">Lưu Ghi Chú</button>
+        <button id="cancelEditButton" class="cancel-btn" style="display: none;">Hủy Chỉnh Sửa</button>
+    </div>
+
+    <!-- Danh sách ghi chú -->
+    <div id="notesList"></div>
+
+    <!-- MÃ KẾT NỐI INTERNET & DỮ LIỆU -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-app.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, doc, updateDoc } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyB4E53KScKW8a-MPX-wnYQLuUGA88UIyfI",
+            authDomain: "notevna.firebaseapp.com",
+            projectId: "notevna",
+            storageBucket: "notevna.firebasestorage.app",
+            messagingSenderId: "423178381098",
+            appId: "1:423178381098:web:574715974de58edd806053"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        const saveButton = document.getElementById('saveButton');
+        const cancelEditButton = document.getElementById('cancelEditButton');
+        const noteContent = document.getElementById('noteContent');
+        const notesList = document.getElementById('notesList');
+        const searchInput = document.getElementById('searchInput');
+
+        let allNotes = [];
+        let editingNoteId = null; // Biến để theo dõi xem có đang sửa ghi chú nào không
+
+        // Chức năng lưu / cập nhật ghi chú
+        saveButton.addEventListener('click', async () => {
+            const text = noteContent.value;
+            if (text.trim() === "") return;
+
+            saveButton.innerText = "Đang lưu...";
+            
+            try {
+                if (editingNoteId) {
+                    // Nếu đang trong chế độ SỬA
+                    const noteRef = doc(db, "notes", editingNoteId);
+                    await updateDoc(noteRef, {
+                        text: text,
+                        updatedAt: new Date().getTime() // Lưu thêm thời gian sửa
+                    });
+                    editingNoteId = null; // Trả lại trạng thái bình thường
+                    cancelEditButton.style.display = "none";
+                } else {
+                    // Nếu TẠO MỚI
+                    await addDoc(collection(db, "notes"), {
+                        text: text,
+                        createdAt: new Date().getTime()
+                    });
+                }
+                noteContent.value = "";
+            } catch (error) {
+                console.error("Lỗi khi lưu:", error);
+                alert("Lỗi! Chưa lưu được.");
+            }
+            saveButton.innerText = "Lưu Ghi Chú";
+        });
+
+        // Hủy chỉnh sửa
+        cancelEditButton.addEventListener('click', () => {
+            editingNoteId = null;
+            noteContent.value = "";
+            saveButton.innerText = "Lưu Ghi Chú";
+            cancelEditButton.style.display = "none";
+        });
+
+        // Tải và hiển thị ghi chú
+        const q = query(collection(db, "notes"), orderBy("createdAt", "desc"));
+        
+        onSnapshot(q, (snapshot) => {
+            allNotes = [];
+            snapshot.forEach((documentSnapshot) => {
+                allNotes.push({ id: documentSnapshot.id, ...documentSnapshot.data() });
+            });
+            renderNotes(allNotes);
+        });
+
+        function renderNotes(notesToDisplay) {
+            notesList.innerHTML = "";
+            notesToDisplay.forEach(note => {
+                const createdDate = new Date(note.createdAt).toLocaleString('vi-VN');
+                const updatedText = note.updatedAt ? ` (Đã sửa lúc: ${new Date(note.updatedAt).toLocaleString('vi-VN')})` : '';
+                
+                const div = document.createElement('div');
+                div.className = 'note';
+                div.innerHTML = `
+                    <div class="date">🗓️ Lưu lúc: ${createdDate} ${updatedText}</div>
+                    <div>${note.text}</div>
+                    <button class="edit-btn" data-id="${note.id}" data-text="${note.text.replace(/"/g, '&quot;')}">Sửa</button>
+                `;
+                notesList.appendChild(div);
+            });
+
+            // Gắn sự kiện cho các nút Sửa
+            document.querySelectorAll('.edit-btn').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const id = e.target.getAttribute('data-id');
+                    const text = e.target.getAttribute('data-text');
+                    
+                    noteContent.value = text;
+                    editingNoteId = id; // Đánh dấu là đang sửa ghi chú này
+                    
+                    saveButton.innerText = "Cập nhật Ghi Chú";
+                    cancelEditButton.style.display = "inline-block";
+                    window.scrollTo(0, 0); // Cuộn lên đầu trang
+                });
+            });
+        }
+
+        // Chức năng tìm kiếm
+        searchInput.addEventListener('input', (e) => {
+            const keyword = e.target.value.toLowerCase();
+            const filteredNotes = allNotes.filter(note => 
+                note.text.toLowerCase().includes(keyword)
+            );
+            renderNotes(filteredNotes);
+        });
+    </script>
+</body>
+</html>
