@@ -7,7 +7,8 @@
         body { font-family: sans-serif; padding: 20px; max-width: 600px; margin: auto; }
         textarea { width: 100%; height: 100px; margin-bottom: 10px; padding: 10px; box-sizing: border-box;}
         input[type="text"] { width: 100%; padding: 10px; margin-bottom: 20px; box-sizing: border-box; border: 2px solid #007bff; border-radius: 5px;}
-        button { padding: 10px 15px; background: #007bff; color: white; border: none; cursor: pointer; border-radius: 5px;}
+        input[type="file"] { margin-bottom: 10px; width: 100%; }
+        button { padding: 10px 15px; background: #007bff; color: white; border: none; cursor: pointer; border-radius: 5px; font-weight: bold;}
         button:hover { background: #0056b3; }
         .note { border: 1px solid #ddd; padding: 15px; margin-top: 15px; background: #f9f9f9; border-radius: 5px; white-space: pre-wrap; position: relative;}
         .date { font-size: 0.8em; color: #666; margin-bottom: 10px; border-bottom: 1px solid #ccc; padding-bottom: 5px;}
@@ -15,6 +16,8 @@
         .edit-btn:hover { background: #e0a800; }
         .cancel-btn { background: #dc3545; margin-left: 5px;}
         .cancel-btn:hover { background: #c82333; }
+        .attachment { margin-top: 10px; display: inline-block; background: #e2e3e5; padding: 5px 10px; border-radius: 3px; font-size: 0.9em; text-decoration: none; color: #383d41;}
+        .attachment:hover { background: #d6d8db; }
     </style>
 </head>
 <body>
@@ -26,6 +29,10 @@
 
     <!-- Tạo/Sửa ghi chú -->
     <textarea id="noteContent" placeholder="Nhập nội dung ghi chú của bạn vào đây..."></textarea>
+    
+    <!-- Chọn tệp tin tải lên -->
+    <input type="file" id="fileUpload" title="Chọn tệp đính kèm">
+
     <div>
         <button id="saveButton">Lưu Ghi Chú</button>
         <button id="cancelEditButton" class="cancel-btn" style="display: none;">Hủy Chỉnh Sửa</button>
@@ -34,11 +41,11 @@
     <!-- Danh sách ghi chú -->
     <div id="notesList"></div>
 
-    <!-- MÃ KẾT NỐI INTERNET & DỮ LIỆU -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-app.js";
         import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, doc, updateDoc } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-firestore.js";
 
+        // CẤU HÌNH FIREBASE
         const firebaseConfig = {
             apiKey: "AIzaSyB4E53KScKW8a-MPX-wnYQLuUGA88UIyfI",
             authDomain: "notevna.firebaseapp.com",
@@ -54,53 +61,88 @@
         const saveButton = document.getElementById('saveButton');
         const cancelEditButton = document.getElementById('cancelEditButton');
         const noteContent = document.getElementById('noteContent');
+        const fileUpload = document.getElementById('fileUpload');
         const notesList = document.getElementById('notesList');
         const searchInput = document.getElementById('searchInput');
 
-        let allNotes = [];
-        let editingNoteId = null; // Biến để theo dõi xem có đang sửa ghi chú nào không
+        // CẤU HÌNH CLOUDINARY
+        const cloudinaryUrl = "https://api.cloudinary.com/v1_1/dzvqilper/upload";
+        const cloudinaryPreset = "notevnapreset";
 
-        // Chức năng lưu / cập nhật ghi chú
+        let allNotes = [];
+        let editingNoteId = null; 
+
         saveButton.addEventListener('click', async () => {
             const text = noteContent.value;
-            if (text.trim() === "") return;
+            const file = fileUpload.files[0];
+            
+            if (text.trim() === "" && !file) {
+                alert("Vui lòng nhập nội dung hoặc chọn tệp tin!");
+                return;
+            }
 
             saveButton.innerText = "Đang lưu...";
+            saveButton.disabled = true;
             
+            let fileUrlToSave = "";
+
             try {
-                if (editingNoteId) {
-                    // Nếu đang trong chế độ SỬA
-                    const noteRef = doc(db, "notes", editingNoteId);
-                    await updateDoc(noteRef, {
-                        text: text,
-                        updatedAt: new Date().getTime() // Lưu thêm thời gian sửa
+                // Nếu có chọn file, tải lên Cloudinary trước
+                if (file) {
+                    saveButton.innerText = "Đang tải tệp lên...";
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    formData.append('upload_preset', cloudinaryPreset);
+
+                    const uploadRes = await fetch(cloudinaryUrl, {
+                        method: 'POST',
+                        body: formData
                     });
-                    editingNoteId = null; // Trả lại trạng thái bình thường
+                    
+                    if (!uploadRes.ok) throw new Error("Không thể tải tệp lên Cloudinary");
+                    const cloudData = await uploadRes.json();
+                    fileUrlToSave = cloudData.secure_url; // Lấy link file an toàn
+                }
+
+                if (editingNoteId) {
+                    // CẬP NHẬT GHI CHÚ
+                    const noteRef = doc(db, "notes", editingNoteId);
+                    const updateData = { text: text, updatedAt: new Date().getTime() };
+                    if (fileUrlToSave) updateData.fileUrl = fileUrlToSave; // Nếu có file mới thì đè lên file cũ
+
+                    await updateDoc(noteRef, updateData);
+                    editingNoteId = null;
                     cancelEditButton.style.display = "none";
                 } else {
-                    // Nếu TẠO MỚI
+                    // TẠO GHI CHÚ MỚI
                     await addDoc(collection(db, "notes"), {
                         text: text,
+                        fileUrl: fileUrlToSave,
                         createdAt: new Date().getTime()
                     });
                 }
+                
+                // Khôi phục giao diện sau khi lưu thành công
                 noteContent.value = "";
+                fileUpload.value = ""; 
             } catch (error) {
-                console.error("Lỗi khi lưu:", error);
-                alert("Lỗi! Chưa lưu được.");
+                console.error("Lỗi:", error);
+                alert("Lỗi! Chưa lưu được dữ liệu.");
             }
+            
             saveButton.innerText = "Lưu Ghi Chú";
+            saveButton.disabled = false;
         });
 
-        // Hủy chỉnh sửa
         cancelEditButton.addEventListener('click', () => {
             editingNoteId = null;
             noteContent.value = "";
+            fileUpload.value = "";
             saveButton.innerText = "Lưu Ghi Chú";
             cancelEditButton.style.display = "none";
         });
 
-        // Tải và hiển thị ghi chú
+        // TẢI VÀ HIỂN THỊ GHI CHÚ
         const q = query(collection(db, "notes"), orderBy("createdAt", "desc"));
         
         onSnapshot(q, (snapshot) => {
@@ -117,33 +159,38 @@
                 const createdDate = new Date(note.createdAt).toLocaleString('vi-VN');
                 const updatedText = note.updatedAt ? ` (Đã sửa lúc: ${new Date(note.updatedAt).toLocaleString('vi-VN')})` : '';
                 
+                // Hiển thị nút đính kèm nếu có file
+                const attachmentHtml = note.fileUrl 
+                    ? `<br><a href="${note.fileUrl}" target="_blank" class="attachment">📎 Xem tệp đính kèm</a>` 
+                    : '';
+
                 const div = document.createElement('div');
                 div.className = 'note';
                 div.innerHTML = `
                     <div class="date">🗓️ Lưu lúc: ${createdDate} ${updatedText}</div>
                     <div>${note.text}</div>
+                    ${attachmentHtml}
                     <button class="edit-btn" data-id="${note.id}" data-text="${note.text.replace(/"/g, '&quot;')}">Sửa</button>
                 `;
                 notesList.appendChild(div);
             });
 
-            // Gắn sự kiện cho các nút Sửa
             document.querySelectorAll('.edit-btn').forEach(button => {
                 button.addEventListener('click', (e) => {
                     const id = e.target.getAttribute('data-id');
                     const text = e.target.getAttribute('data-text');
                     
                     noteContent.value = text;
-                    editingNoteId = id; // Đánh dấu là đang sửa ghi chú này
+                    editingNoteId = id; 
                     
                     saveButton.innerText = "Cập nhật Ghi Chú";
                     cancelEditButton.style.display = "inline-block";
-                    window.scrollTo(0, 0); // Cuộn lên đầu trang
+                    window.scrollTo(0, 0); 
                 });
             });
         }
 
-        // Chức năng tìm kiếm
+        // TÌM KIẾM
         searchInput.addEventListener('input', (e) => {
             const keyword = e.target.value.toLowerCase();
             const filteredNotes = allNotes.filter(note => 
