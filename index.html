@@ -24,13 +24,8 @@
 
     <h1>Ghi Chú Đám Mây ☁️📝</h1>
     
-    <!-- Thanh tìm kiếm -->
     <input type="text" id="searchInput" placeholder="🔍 Tìm kiếm mọi thứ trong ghi chú...">
-
-    <!-- Tạo/Sửa ghi chú -->
     <textarea id="noteContent" placeholder="Nhập nội dung ghi chú của bạn vào đây..."></textarea>
-    
-    <!-- Chọn tệp tin tải lên -->
     <input type="file" id="fileUpload" title="Chọn tệp đính kèm">
 
     <div>
@@ -38,14 +33,14 @@
         <button id="cancelEditButton" class="cancel-btn" style="display: none;">Hủy Chỉnh Sửa</button>
     </div>
 
-    <!-- Danh sách ghi chú -->
     <div id="notesList"></div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-app.js";
         import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, doc, updateDoc } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-firestore.js";
+        // NHẬP CÔNG CỤ FIREBASE STORAGE
+        import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-storage.js";
 
-        // CẤU HÌNH FIREBASE
         const firebaseConfig = {
             apiKey: "AIzaSyB4E53KScKW8a-MPX-wnYQLuUGA88UIyfI",
             authDomain: "notevna.firebaseapp.com",
@@ -57,6 +52,7 @@
 
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
+        const storage = getStorage(app); // Khởi tạo Storage
 
         const saveButton = document.getElementById('saveButton');
         const cancelEditButton = document.getElementById('cancelEditButton');
@@ -64,10 +60,6 @@
         const fileUpload = document.getElementById('fileUpload');
         const notesList = document.getElementById('notesList');
         const searchInput = document.getElementById('searchInput');
-
-        // CẤU HÌNH CLOUDINARY - ĐÃ SỬA CHÍNH XÁC NHƯ ẢNH BẠN GỬI
-        const cloudinaryUrl = "https://api.cloudinary.com/v1_1/dzvqilper/auto/upload";
-        const cloudinaryPreset = "notesvna-preset";
 
         let allNotes = [];
         let editingNoteId = null; 
@@ -87,28 +79,24 @@
             let fileUrlToSave = "";
 
             try {
-                // Nếu có chọn file, tải lên Cloudinary trước
+                // TẢI TỆP LÊN FIREBASE STORAGE NẾU CÓ TỆP
                 if (file) {
                     saveButton.innerText = "Đang tải tệp lên...";
-                    const formData = new FormData();
-                    formData.append('file', file);
-                    formData.append('upload_preset', cloudinaryPreset);
+                    // Tạo tên tệp độc nhất để không bị trùng lặp
+                    const uniqueFileName = new Date().getTime() + "_" + file.name;
+                    const storageRef = ref(storage, 'uploads/' + uniqueFileName);
 
-                    const uploadRes = await fetch(cloudinaryUrl, {
-                        method: 'POST',
-                        body: formData
-                    });
-                    
-                    if (!uploadRes.ok) throw new Error("Không thể tải tệp lên Cloudinary");
-                    const cloudData = await uploadRes.json();
-                    fileUrlToSave = cloudData.secure_url; // Lấy link file an toàn
+                    // Đẩy tệp lên Firebase
+                    await uploadBytes(storageRef, file);
+                    // Lấy đường link của tệp vừa tải
+                    fileUrlToSave = await getDownloadURL(storageRef);
                 }
 
                 if (editingNoteId) {
                     // CẬP NHẬT GHI CHÚ
                     const noteRef = doc(db, "notes", editingNoteId);
                     const updateData = { text: text, updatedAt: new Date().getTime() };
-                    if (fileUrlToSave) updateData.fileUrl = fileUrlToSave; // Nếu có file mới thì đè lên file cũ
+                    if (fileUrlToSave) updateData.fileUrl = fileUrlToSave;
 
                     await updateDoc(noteRef, updateData);
                     editingNoteId = null;
@@ -118,16 +106,16 @@
                     await addDoc(collection(db, "notes"), {
                         text: text,
                         fileUrl: fileUrlToSave,
-                        createdAt: new Date().getTime()
+                        createdAt: new Date().getTime(),
+                        fileName: file ? file.name : "" // Lưu thêm tên tệp gốc
                     });
                 }
                 
-                // Khôi phục giao diện sau khi lưu thành công
                 noteContent.value = "";
                 fileUpload.value = ""; 
             } catch (error) {
                 console.error("Lỗi:", error);
-                alert("Lỗi! Chưa lưu được dữ liệu.");
+                alert("Lỗi! Chưa lưu được dữ liệu. Vui lòng kiểm tra quyền truy cập Storage.");
             }
             
             saveButton.innerText = "Lưu Ghi Chú";
@@ -159,9 +147,10 @@
                 const createdDate = new Date(note.createdAt).toLocaleString('vi-VN');
                 const updatedText = note.updatedAt ? ` (Đã sửa lúc: ${new Date(note.updatedAt).toLocaleString('vi-VN')})` : '';
                 
-                // Hiển thị nút đính kèm nếu có file
+                // Hiển thị tên tệp gốc thay vì chữ "Xem tệp đính kèm" chung chung
+                const displayFileName = note.fileName ? note.fileName : "Tệp đính kèm";
                 const attachmentHtml = note.fileUrl 
-                    ? `<br><a href="${note.fileUrl}" target="_blank" class="attachment">📎 Xem tệp đính kèm</a>` 
+                    ? `<br><a href="${note.fileUrl}" target="_blank" class="attachment">📎 ${displayFileName}</a>` 
                     : '';
 
                 const div = document.createElement('div');
